@@ -86,7 +86,7 @@ OpenAI API 互換のエンドポイント(/audio/speech)を持っています。
 
 nousresearch/hermes-agent
 ```
-sha256:adb7890916de63245523492be8f68f9d2095fecbec4e2a6dab7960381f0fc002   adb7890916de
+sha256:adb7890916de63245523492be8f68f9d2095fecbec4e2a6dab7960381f0fc002
 ```
 ghcr.io/open-webui/open-webui
 ```
