@@ -1,0 +1,7 @@
+.env
+*pyc*
+volumes/tts/reference_audio.wav
+volumes/tts/reference_text.txt
+volumes/nginx/certs/*
+volumes/hermes/cert/openai-compatible-service.crt
+volumes/open-webui/app/backend/data/*

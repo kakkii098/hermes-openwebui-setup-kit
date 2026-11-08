@@ -1,0 +1,166 @@
+services:
+  # HERMES エージェント
+  hermes:
+    image: nousresearch/hermes-agent:latest
+    container_name: hermes
+    hostname: hermes
+    networks:
+      - llm_services
+    volumes:
+      - ./volumes/hermes/opt/data:/opt/data
+      - ./volumes/hermes/cert:/cert
+      - ./volumes/hermes/data/:/data
+    environment:
+      - HERMES_DASHBOARD=1
+      - HERMES_DASHBOARD_PORT=9005
+      - HERMES_DASHBOARD_BASIC_AUTH_USERNAME=$HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+      - HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=$HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+      - HERMES_DASHBOARD_BASIC_AUTH_SECRET=$HERMES_DASHBOARD_BASIC_AUTH_SECRET
+      - HERMES_STREAM_STALE_TIMEOUT=600                 # API のストリームが切断されるまでの時間(秒)
+      - OPENAI_API_BASE_URL=$OPENAI_API_BASE_URL
+      - OPENAI_API_KEY=$OPENAI_API_KEY
+      - GEMINI_API_KEY=$GEMINI_API_KEY
+      - STT_OPENAI_BASE_URL=https://$HOST_NAME:9001/v1     # hermes desktop から見えるアドレスを指定, ポートは nginx の stt 
+      # - TTS_OPENAI_BASE_URL=http://tts:8880/v1           # hermes desktop から見えるアドレスを指定, ポートは nginx の tts 
+      # - TTS_OPENAI_VOICE=jf_alpha
+      # 現状 TTS パラメータは意味がない see: https://github.com/NousResearch/hermes-agent/pull/326
+      - VOICE_TOOLS_OPENAI_KEY=$KOKORO_API_KEY
+      - SEARXNG_URL=http://searxng:8080
+      - API_SERVER_ENABLED=true
+      - API_SERVER_KEY=$HERMES_API_KEY
+      - API_SERVER_HOST=0.0.0.0
+      - API_SERVER_PORT=9004
+      - SSL_CERT_FILE=/cert/openai-compatible-service.crt # Ollama 等の外部 LLM API の self signed certificates
+    depends_on:
+      - searxng
+      - stt
+      - tts
+    command: ["gateway", "run"]
+  # web から HERMES を扱う
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    hostname: open-webui
+    environment:
+      - OPENAI_API_BASE_URL=http://hermes:9004/v1
+      - OPENAI_API_KEY=$HERMES_API_KEY
+      - ENABLE_RAG_WEB_SEARCH=true
+      - ENABLE_OLLAMA_API=false
+      - RAG_WEB_SEARCH_ENGINE=searxng
+      - SEARXNG_QUERY_URL=http://searxng:8080
+      - AUDIO_STT_ENGINE=openai
+      - AUDIO_STT_OPENAI_API_KEY=undefined
+      - AUDIO_STT_OPENAI_API_BASE_URL=http://stt:9000/v1  # hermes desktop から見えるアドレスを指定, ポートは nginx の stt 
+      - AUDIO_TTS_ENGINE=openai
+      - AUDIO_TTS_OPENAI_API_KEY=$KOKORO_API_KEY
+      - AUDIO_TTS_OPENAI_API_BASE_URL=http://tts:8880/v1
+      - AUDIO_TTS_OPENAI_VOICE=jf_alpha
+    networks:
+      - llm_services
+    volumes:
+      - ./volumes/open-webui/app/backend/data:/app/backend/data
+    depends_on:
+      - searxng
+      - stt
+      - tts
+      - hermes
+  # Web 検索エンジン (エージェント用)
+  searxng:
+    image: searxng/searxng
+    container_name: searxng
+    hostname: searxng
+    networks:
+      - llm_services
+    volumes:
+      - ./volumes/searxng/etc/searxng/settings.yml:/etc/searxng/settings.yml
+    environment:
+      - SEARXNG_SECRET=$SEARXNG_SECRET
+  # 文字起こし(Speech To Text)エンジン
+  stt:
+    image: python:3.13
+    container_name: stt
+    hostname: stt
+    networks:
+      - llm_services
+    volumes:
+      - ./requirements/stt.txt:/requirements/stt.txt:ro
+      - ./app/stt:/app
+    command: >  
+      bash -c "
+        cd app/ && \
+        pip install -r /requirements/stt.txt && \
+        uvicorn main:app --host 0.0.0.0 --port 9000
+      "
+  # 音声合成 (Text To Speech) エンジン (CPU/低負荷/低声質版)
+  tts:
+    image: hwdsl2/kokoro-server:latest-amd64
+    container_name: tts
+    hostname: tts
+    environment:
+      - KOKORO_LANG_CODE=j
+      - KOKORO_VOICE=jf_alpha
+      - KOKORO_API_KEY=$KOKORO_API_KEY
+    networks:
+      - llm_services
+    entrypoint: >
+      bash -c "
+          python3 -m pip install --upgrade pip && \
+          python3 -m pip install unidic && \
+          python3 -m unidic download && \
+          bash /opt/src/run.sh \
+      "
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    hostname: nginx
+    ports:
+      - 9000:9000 # searxng
+      - 9001:9001 # stt
+      - 9002:9002 # tts
+      - 9003:9003 # open-webui
+      # - 9004:9004 # hermes gateway (default: disabled, use hermes openai api compatible api server instead)
+      - 9005:9005 # hermes dashboard 
+    networks:
+      - llm_services
+    volumes:
+      - ./volumes/nginx/certs:/etc/nginx/ssl
+      - ./volumes/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - hermes
+      - open-webui
+  # 音声合成 (Text To Speech) エンジン (GPU(Cuda12.4 or later)/高負荷/高品質版)
+  # 使用する場合は Cuda 対応の GPU が必要です。GPU がない場合は、上記の CPU 版を使用してください。
+  # ボイスクローンを使用するため参考となる音源を ./volumes/tts に配置してください。 
+  # reference_audio.wav という名前で配置する必要があります。また、reference_audio.wav で発話している音声のテキストを reference_text.txt に記載して同じフォルダに配置してください。
+  # tts:
+  #   image: pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel
+  #   container_name: tts
+  #   hostname: tts
+  #   # nginx 経由でアクセスする
+  #   # ports:
+  #   #   - 9002:8880
+  #   networks:
+  #     - llm_services
+  #   volumes:
+  #     - ./requirements/tts.txt:/requirements/tts.txt:ro
+  #     - ./app/tts:/app
+  #     - ./volumes/tts:/resources
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+  #   command: >  
+  #     bash -c "
+  #       apt update && apt upgrade -y && apt install -y sox git && \
+  #       python3 -m pip install -U torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124 --break-system-packages && \
+  #       python3 -m pip install flash-attn==2.6.3 --no-build-isolation --find-links https://github.com/Dao-AILab/flash-attention/releases/v2.6.3 --break-system-packages && \
+  #       python3 -m pip install -U -r /requirements/tts.txt --break-system-packages && \
+  #       cd /app && \
+  #       python3 -m uvicorn main:app --host 0.0.0.0 --port 8880
+  #     "
+networks:
+  llm_services:
+    driver: bridge
