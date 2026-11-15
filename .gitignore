@@ -3,5 +3,8 @@
 volumes/tts/reference_audio.wav
 volumes/tts/reference_text.txt
 volumes/nginx/certs/*
+volumes/nginx/external-server-certs/openai-compatible-service.crt
 volumes/hermes/cert/openai-compatible-service.crt
 volumes/open-webui/app/backend/data/*
+volumes/nginx/external-server-certs/*
+volumes/hermes/certs/openai-compatible-service.crt

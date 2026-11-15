@@ -1,4 +1,7 @@
+import json
 from contextlib import asynccontextmanager
+from typing import Any
+
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import Response
 from fastapi.concurrency import run_in_threadpool
@@ -69,28 +72,29 @@ def split_text_into_chunks(text: str, delimiters: list) -> list[str]:
     chunks = [chunk.strip() for chunk in text.split("<SPLIT>") if chunk.strip()]
     return chunks if chunks else [text]
 
+
+def ensure_model_and_prompt(app: FastAPI):
+    if getattr(app.state, "model", None) is None:
+        app.state.model = FasterQwen3TTS.from_pretrained("Qwen/Qwen3-TTS-12Hz-0.6B-Base")
+
+    if getattr(app.state, "voice_clone_prompt", None) is None:
+        reference_audio_path = "/resources/reference_audio.wav"
+        reference_text_path = "/resources/reference_text.txt"
+        reference_hash_path = "/resources/reference_hash.txt"
+        reference_prompt_path = "/resources/voice_clone_prompt.pt"
+
+        app.state.voice_clone_prompt = load_voice_clone_prompt(
+            model=app.state.model,
+            audio_path=reference_audio_path,
+            text_path=reference_text_path,
+            hash_path=reference_hash_path,
+            prompt_path=reference_prompt_path,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    reference_audio_path = "/resources/reference_audio.wav"
-    reference_text_path = "/resources/reference_text.txt"
-    reference_hash_path = "/resources/reference_hash.txt"
-    reference_prompt_path = "/resources/voice_clone_prompt.pt"
-
-    # FastAPI 起動時にモデルを初期化
-    model = FasterQwen3TTS.from_pretrained("Qwen/Qwen3-TTS-12Hz-0.6B-Base")
-
-    # 参照音声とテキストから Voice Clone 用プロンプトをロードまたは生成
-    voice_clone_prompt = load_voice_clone_prompt(
-        model=model,
-        audio_path=reference_audio_path,
-        text_path=reference_text_path,
-        hash_path=reference_hash_path,
-        prompt_path=reference_prompt_path,
-    )
-
-    app.state.model = model
-    app.state.voice_clone_prompt = voice_clone_prompt
-
+    ensure_model_and_prompt(app)
     yield
 
 app = FastAPI(
@@ -103,24 +107,52 @@ app = FastAPI(
 )
 
 # OpenAI API 互換のTTSエンドポイント(input 以外のキーワードは未使用)
-@app.post("/audio/speech")
+@app.post("/v1/audio/speech")
 async def audio_transcription(request: Request):
     model = get_model(request=request)
     voice_clone_prompt = get_voice_clone_prompt(request=request)
     if not model or voice_clone_prompt is None:
         raise HTTPException(status_code=500, detail={"error": "Model not initialized."})
-  
-    body = await request.json()
-    text = body.get("input")
+
+    body = await request.body()
+    text: Any = None
+    if body:
+        try:
+            payload = json.loads(body)
+        except (TypeError, ValueError):
+            payload = body.decode("utf-8")
+
+        if isinstance(payload, dict):
+            text = payload.get("input") or payload.get("text")
+        elif isinstance(payload, list):
+            text = " ".join(str(item) for item in payload)
+        else:
+            text = payload
+
+    if text is None:
+        try:
+            payload = await request.json()
+            if isinstance(payload, dict):
+                text = payload.get("input") or payload.get("text")
+            elif isinstance(payload, list):
+                text = " ".join(str(item) for item in payload)
+            else:
+                text = payload
+        except Exception:
+            raise HTTPException(status_code=400, detail="Request body must include an input string.")
+
+    if text is None or (isinstance(text, str) and not text.strip()):
+        raise HTTPException(status_code=400, detail="Request body must include an input string.")
 
     def _generate():
         return model.generate_voice_clone(
-            text=text,
+            text=str(text),
             language="Japanese",
             voice_clone_prompt=voice_clone_prompt,
         )
+
     wavs, sr = await run_in_threadpool(_generate)
-    
+
     # バイトストリーム（WAV形式）として返却
     buffer = io.BytesIO()
     soundfile.write(buffer, wavs[0], sr, format="WAV")
@@ -129,8 +161,18 @@ async def audio_transcription(request: Request):
 
     return Response(content=buffer.read(), media_type="audio/wav")
 
+
 def get_model(request: Request):
-    return request.app.state.model
+    model = getattr(request.app.state, "model", None)
+    if model is None:
+        ensure_model_and_prompt(request.app)
+        model = getattr(request.app.state, "model", None)
+    return model
+
 
 def get_voice_clone_prompt(request: Request):
-    return request.app.state.voice_clone_prompt
+    voice_clone_prompt = getattr(request.app.state, "voice_clone_prompt", None)
+    if voice_clone_prompt is None:
+        ensure_model_and_prompt(request.app)
+        voice_clone_prompt = getattr(request.app.state, "voice_clone_prompt", None)
+    return voice_clone_prompt

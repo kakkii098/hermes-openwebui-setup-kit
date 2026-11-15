@@ -1,6 +1,13 @@
 #!/bin/bash
 # ホストの IP アドレス(IPv4/LAN内)
+echo "Generating self-signed SSL certificates for Nginx..."
+
 HOST_IP="$(hostname -I | grep -oE '192.168.[0-9]+.[0-9]+')" # 192.168.xxx.xxx のアドレスを取り出し
+
+echo "Host IP Address: $HOST_IP"
+echo "if you want to use a different IP address, please set the HOST_IP variable in this script."
+# HOST_IP="xxx.xxx.xxx.xxx" # ここに使用したいIPアドレスを設定してください
+
 P12_PASSWORD="changeIt"
 
 # Nginxコンテナ名

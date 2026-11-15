@@ -114,3 +114,73 @@ server {
 	}
 }
 
+
+# OpenAI API 互換サービスの中継(内部処理用/非公開)
+server {
+    listen 9006;
+  
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header Upgrade $http_upgrade; 
+    proxy_set_header Connection $connection_upgrade;
+
+    proxy_read_timeout 600s; # 10分間の長めのタイムアウトを設定
+
+    # TTS(音声合成): http://tts へ
+    location ~ ^/(v1/)?audio/speech {
+        rewrite "^/(v1/)?audio/speech" /v1/audio/speech break;
+        proxy_pass http://tts:8880;
+    }
+
+    # STT(文字起こし): http://stt へ
+    location ~ ^/(v1/)?audio/transcriptions {
+        rewrite "^/(v1/)?audio/transcriptions" /v1/audio/transcriptions break;
+        proxy_pass http://stt:9000;
+    }
+
+    # チャットの転送: ${OPENAI_API_BASE_URL} へ
+    location ~ ^/(v1/)?chat/completions {
+        # 厳密に /chat/completions だけを対象とし、/v1/chat/completions へ書き換え
+        # hermes api 経由で /v1/chat/completions へアクセスすると、hermes api からのアクセスが /chat/completions へリダイレクトされるため、ここで書き換えを行う
+        rewrite "^/(v1/)?chat/completions" /v1/chat/completions break;
+        proxy_pass ${OPENAI_API_BASE_URL};
+        
+        # システム標準 + certs/ 内の全 .crt が結合されたファイルを信頼
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/nginx/external-server-certs/combined-ca.crt;
+        proxy_ssl_server_name on;
+
+        proxy_set_header Host $host;
+    }
+
+    location ~ ^/(v1/)?responses {
+        # /responses は /v1/responses へ書き換え
+        # hermes api 経由で /v1/responses へアクセスすると、hermes api からのアクセスが /responses へリダイレクトされるため、ここで書き換えを行う
+        rewrite "^/(v1/)?responses" /v1/responses break;
+
+        proxy_pass ${OPENAI_API_BASE_URL};
+        
+        # システム標準 + certs/ 内の全 .crt が結合されたファイルを信頼
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/nginx/external-server-certs/combined-ca.crt;
+        proxy_ssl_server_name on;
+
+        proxy_set_header Host $host;
+    }
+
+    location / {
+        # その他の全ての通信は LLM サーバーへ転送する
+        proxy_pass ${OPENAI_API_BASE_URL};
+        
+        # システム標準 + certs/ 内の全 .crt が結合されたファイルを信頼
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/nginx/external-server-certs/combined-ca.crt;
+        proxy_ssl_server_name on;
+
+        proxy_set_header Host $host;
+
+    }
+
+
+
+}

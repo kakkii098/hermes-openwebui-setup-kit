@@ -1,5 +1,5 @@
 # What is This
-LLM のための関連サービスのコンテナです。  
+LLM のための関連サービスのコンテナ
 ホストコンピュータの外に公開する場合、それぞれのポートへのアクセス許可(ufwなど)が必要です。
 ホスト OS は Linux を想定しています。
 
@@ -7,6 +7,9 @@ LLM のための関連サービスのコンテナです。
 本リポジトリは公開していますが基本的に作者個人が利用する想定です。
 本リポジトリは現状のままの公開となり、それの利用により発生したあらゆる損害等に作者は一切の責任等を負いません。
 各自の責任と判断に基づいて利用してください。
+
+重要: 本プロジェクトは安全なプライベートネットワーク内での利用を前提としています。インターネットへ直接公開しないでください。
+
 
 ## 初期設定
 ### SSL証明書の信頼
@@ -79,49 +82,17 @@ OpenAI API 互換のエンドポイント(/audio/speech)を持っています。
 ### nginx : SSL プロキシ コンテナ
 全てのコンテナの SSL プロキシです。
 **実際にはこのコンテナを経由して他のサービスにアクセスします**
+また、hermes からの stt, tts, openai compatible api を単一の OPENAI_BASE_URL にまとめる役割もあります。
 
+## Hermes Desktop の設定について
+このコンテナ群で設定できない、Hermes Desktop アプリで必要な設定について説明します。
 
-## 注意事項
-以下のコンテナバージョンの hermes, open-webui の組み合わせで、open-webui が hermes api server 経由で OpenAI 互換エンドポイントにアクセスした際に、 ```/v1``` がパスから外れる以上を確認しています。
-
-nousresearch/hermes-agent
-```
-sha256:adb7890916de63245523492be8f68f9d2095fecbec4e2a6dab7960381f0fc002
-```
-ghcr.io/open-webui/open-webui
-```
-sha256:975e3965dcf5832804d2f77e167920794757027c5a2046917d42023d75fac431
-```
-
-### 対策
-Open AI API 互換 API の前に Nginx を噛ませて、以下のように```/chat/completions```を```/v1/chat/completions```に転送してください。
-```
-map $http_upgrade $connection_upgrade { 
-    default upgrade;
-    ''      close;
-} 
-
-# NGINX_PORT, LLM_HOST, LLM_PORT は読み替えてください
-server {
-    listen $NGINX_PORT ssl;
-    
-    ssl_certificate     /etc/nginx/ssl/xxxxxxxxxx.crt;  # Self Signed Certificates
-    ssl_certificate_key /etc/nginx/ssl/xxxxxxxxxx.key;  # Self Signed Certificates Key
-
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header Upgrade $http_upgrade; 
-    proxy_set_header Connection $connection_upgrade;
-
-    location /chat/completions {
-        # /chat/completions だけを対象とし、/v1/chat/completions へ書き換え
-        rewrite ^ /v1/chat/completions break;
-        proxy_pass http://$LLM_HOST:$LLM_PORT;
-    }
-
-    location / {
-        proxy_pass http:/$LLM_HOST:$LLM_PORT;
-	}
-}
-
-```
+### 音声合成の設定
+Hermes Desktop の設定画面(ウィンドウ右上の歯車マーク)から、以下のメニューを開いてください。
+`音声 > 音声合成`
+以下の項目について設定してください。
+| 項目名 | 設定値 |
+| -- | -- |
+| 音声合成プロバイダー | Openai |
+| OpenAI TTS モデル | tts-1 |
+| OpenAI 音声 | jf_alpha |

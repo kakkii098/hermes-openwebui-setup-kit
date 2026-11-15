@@ -1,0 +1,12 @@
+このディレクトリには以下のファイルがあることを想定しています。
+
+.gitkeep
+reference_audio.wav (optional)
+reference_text.txt (optional)
+
+reference_audio.wav, reference_text.txt はボイスクローン用のサンプル音声とその文字起こしです。
+標準構成では使用しません。
+
+詳細は docker-compose.yml の
+`音声合成 (Text To Speech) エンジン (GPU(Cuda12.4 or later)/高負荷/高品質版)`
+セクションを確認してください。
