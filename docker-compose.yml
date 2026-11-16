@@ -8,7 +8,6 @@ services:
       - llm_services
     volumes:
       - ./volumes/hermes/opt/data:/opt/data
-      - ./volumes/hermes/certs:/certs
       - ./volumes/hermes/data/:/data
     environment:
       - HERMES_DASHBOARD=1
