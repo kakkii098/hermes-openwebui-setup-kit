@@ -1,5 +1,0 @@
-このディレクトリには以下のファイルがあることを想定しています。
-
-openai-compatible-service.crt (Optional)
-
-oenai-compatible-service.crt は LAN 内の LLM サーバーの証明書を記載してください。なくても構いません。
