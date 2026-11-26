@@ -90,7 +90,7 @@ server {
     proxy_read_timeout 600s; # 10分間の長めのタイムアウトを設定
 
 	location / {
-        proxy_pass http://hermes:8642;
+        proxy_pass http://hermes:9004;
 	}
 }
 
